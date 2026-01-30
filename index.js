@@ -1,64 +1,81 @@
 const { chromium } = require('playwright');
+const OpenAI = require('openai');
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+async function generateBlogContent(keyword) {
+    console.log("AI가 블로그 포스팅 내용을 작성하고 있어요...");
+    const prompt = `실시간 트렌드 키워드인 '${keyword}'를 주제로 블로그 포스팅을 작성해줘.
+    - 페르소나: 공감 능력이 뛰어나고 트렌드에 민감한 2030 여성/남성 어조.
+    - 문체: 다정한 "해요체". 옆에서 친구가 말하는 것처럼 친근하게.
+    - 구성: 흥미로운 서론(Hook) -> 상세 정보와 팁이 담긴 본론 -> 따뜻한 결론.
+    - 가독성: 문단은 짧게 끊고, 불렛포인트(*)와 볼드체(**)를 적극 활용해줘.
+    - 마지막에 관련 해시태그 10개 이상 포함해줘.`;
+
+    const response = await openai.chat.completions.create({
+        model: "gpt-4-turbo-preview",
+        messages: [{ role: "user", content: prompt }],
+    });
+    return response.choices[0].message.content;
+}
+
+async function generateImage(keyword) {
+    console.log("AI 이미지를 생성하고 있어요...");
+    const response = await openai.images.generate({
+        model: "dall-e-3",
+        prompt: `A cozy and stylish lifestyle photography related to ${keyword}, 16:9 aspect ratio, natural lighting, high resolution.`,
+        size: "1024x1024", // DALL-E 3는 비율 조절 가능
+    });
+    return response.data[0].url;
+}
 
 async function runMoltbot() {
-  // 1. 브라우저 실행 (화면이 보이지 않는 모드)
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    viewport: { width: 1280, height: 800 },
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-  });
-  const page = await context.newPage();
-
-  try {
-    // 2. 트렌드 키워드 수집 (TrendWidget)
-    console.log("시작: TrendWidget에서 1위 키워드 수집 중...");
-    await page.goto('https://www.trendwidget.app/app', { waitUntil: 'networkidle' });
-    
-    // 1위 키워드 추출 (사이트 구조에 따라 셀렉터는 변경될 수 있음)
-    const hotKeyword = await page.evaluate(() => {
-      const firstItem = document.querySelector('.keyword-list-item'); // 예시 셀렉터
-      return firstItem ? firstItem.innerText.split('\n')[0] : '오늘의 핫 이슈';
+    const browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     });
-    console.log(`현재 1위 키워드: ${hotKeyword}`);
+    const page = await context.newPage();
 
-    // 3. 네이버 로그인
-    console.log("네이버 로그인 시도 중...");
-    await page.goto('https://nid.naver.com/nidlogin.login');
-    await page.fill('#id', process.env.NAVER_ID);
-    await page.fill('#pw', process.env.NAVER_PW);
-    await page.click('.btn_login');
-    await page.waitForTimeout(3000);
+    try {
+        // 1. 키워드 수집
+        await page.goto('https://www.trendwidget.app/app');
+        const hotKeyword = await page.evaluate(() => {
+            return document.querySelector('.keyword-list-item')?.innerText.split('\n')[0] || '요즘 핫한 이슈';
+        });
 
-    // 4. 블로그 글쓰기 페이지 진입 (전달해주신 URL 활용)
-    console.log("블로그 에디터 진입...");
-    await page.goto(`https://blog.naver.com/${process.env.NAVER_ID}?Redirect=Write&categoryNo=1`);
-    await page.waitForTimeout(5000); // 에디터 로딩 대기
+        // 2. 콘텐츠 및 이미지 생성
+        const postContent = await generateBlogContent(hotKeyword);
+        const imageUrl = await generateImage(hotKeyword);
 
-    // 5. 글 작성 (몰트 봇의 '에이전트'다운 동작)
-    // 네이버 에디터는 iframe 내부나 복잡한 div 구조이므로 직접 타이핑 명령을 내립니다.
-    const blogTitle = `[실시간 트렌드] ${hotKeyword}에 대해 알아보기`;
-    const blogBody = `${hotKeyword}가 현재 실시간 검색어 1위를 기록하며 화제가 되고 있습니다. 관련 내용을 정리해 드립니다... (몰트 봇 생성 내용)`;
+        // 3. 네이버 로그인 및 글쓰기
+        await page.goto('https://nid.naver.com/nidlogin.login');
+        await page.fill('#id', process.env.NAVER_ID);
+        await page.fill('#pw', process.env.NAVER_PW);
+        await page.click('.btn_login');
+        await page.waitForTimeout(3000);
 
-    // 제목 입력
-    await page.click('.se-placeholder__text'); // 제목 칸 클릭
-    await page.keyboard.type(blogTitle);
-    
-    // 본문 입력 (네이버 에디터 특성에 맞춘 본문 포커싱)
-    await page.keyboard.press('Tab');
-    await page.keyboard.type(blogBody);
+        // 블로그 에디터 진입 (PM님이 주신 URL)
+        await page.goto(`https://blog.naver.com/${process.env.NAVER_ID}?Redirect=Write&categoryNo=1`);
+        await page.waitForTimeout(5000);
 
-    // 6. 발행 (처음에는 '저장' 버튼을 누르게 하거나, 수동 확인을 위해 주석처리 권장)
-    // await page.click('.publish_btn_클래스명'); 
-    
-    console.log("성공: 포스팅 초안 작성이 완료되었습니다.");
+        // 4. 에디터 조작 (핵심: 팝업 닫기 및 입력)
+        console.log("에디터에 글을 입력합니다.");
+        await page.keyboard.press('Escape'); // 혹시 모를 팝업 닫기
+        
+        await page.click('.se-placeholder__text'); // 제목
+        await page.keyboard.type(`[트렌드 소식] 요즘 난리난 ${hotKeyword}, 알고 계셨나요? ✨`);
+        
+        await page.keyboard.press('Tab'); // 본문으로 이동
+        await page.keyboard.type(postContent);
+        
+        // 이미지의 경우 URL을 본문에 링크하거나 직접 업로드하는 지침 추가 가능
+        console.log("포스팅 초안 작성 완료!");
 
-  } catch (error) {
-    console.error("오류 발생:", error);
-    // 실패 시 스크린샷을 찍어서 로그에서 확인 가능하게 하면 좋습니다.
-    await page.screenshot({ path: 'error_screenshot.png' });
-  } finally {
-    await browser.close();
-  }
+    } catch (error) {
+        console.error("오류 발생:", error);
+    } finally {
+        await browser.close();
+    }
 }
 
 runMoltbot();
