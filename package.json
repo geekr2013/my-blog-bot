@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "playwright": "latest",
-    "@google/generative-ai": "latest"
+    "playwright": "latest"
   }
 }
