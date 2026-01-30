@@ -3,7 +3,7 @@ name: Moltbot Naver Blog Auto Poster
 on:
   schedule:
     - cron: '0 */4 * * *' # 4시간마다 자동 실행
-  workflow_dispatch:      # 수동 실행 버튼 (테스트용)
+  workflow_dispatch:      # 수동 실행 버튼
 
 jobs:
   run-moltbot:
@@ -17,17 +17,17 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 필수 도구 및 브라우저 설치
+      - name: 필수 도구 및 라이브러리 설치
         run: |
           npm install
           npx playwright install-deps
           npx playwright install chromium
 
       - name: 몰트 봇 실행
-        # 바로 이 env 영역이 시크릿과 코드를 연결해주는 통로입니다!
         env:
           NAVER_ID: ${{ secrets.NAVER_ID }}
           NAVER_PW: ${{ secrets.NAVER_PW }}
-          OPENAI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # 이 부분이 중요합니다! 코드(index.js)에서 사용하는 이름과 일치시켰습니다.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
         run: |
           node index.js
