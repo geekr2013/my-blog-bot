@@ -1,0 +1,30 @@
+name: Moltbot Auto Posting
+
+on:
+  schedule:
+    - cron: '0 */4 * * *' # 4시간마다 실행
+  workflow_dispatch: # 수동 실행 버튼
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install Dependencies
+        run: |
+          npm install
+          npx playwright install-deps
+          npx playwright install chromium
+
+      - name: Run Moltbot Action
+        env:
+          NAVER_ID: ${{ secrets.NAVER_ID }}
+          NAVER_PW: ${{ secrets.NAVER_PW }}
+        run: |
+          # 몰트 봇에게 내리는 구체적인 지침
+          node index.js "1. 디시인사이드/뽐뿌 실시간 이슈 수집해줘. 2. 수집된 내용을 바탕으로 네이버 블로그용 정보성 글을 작성해줘. 3. 브라우저를 열어서 네이버 블로그 글쓰기 페이지에 직접 입력하고 발행까지 완료해줘."
