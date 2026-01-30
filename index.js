@@ -1,15 +1,19 @@
 const { chromium } = require('playwright');
 const OpenAI = require('openai');
 
+// 1. OpenAI 설정 (깃허브 시크릿에서 가져온 키 사용)
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function generateBlogContent(keyword) {
-    console.log("AI가 블로그 포스팅 내용을 작성하고 있어요...");
+    console.log(`[AI] '${keyword}' 주제로 맞춤형 포스팅 생성 중...`);
     const prompt = `실시간 트렌드 키워드인 '${keyword}'를 주제로 블로그 포스팅을 작성해줘.
-    - 페르소나: 공감 능력이 뛰어나고 트렌드에 민감한 2030 여성/남성 어조.
-    - 문체: 다정한 "해요체". 옆에서 친구가 말하는 것처럼 친근하게.
-    - 구성: 흥미로운 서론(Hook) -> 상세 정보와 팁이 담긴 본론 -> 따뜻한 결론.
-    - 가독성: 문단은 짧게 끊고, 불렛포인트(*)와 볼드체(**)를 적극 활용해줘.
+    - 페르소나: 공감 능력이 뛰어나고 트렌드에 민감한 2030 세대.
+    - 문체: 아주 다정한 "해요체". 친구에게 이야기하듯 친근하게. (딱딱한 말투 절대 금지)
+    - 구성: 
+      1. 흥미로운 서론(Hook) 
+      2. 실질적 정보와 팁이 담긴 본론 (불렛 포인트와 볼드체 활용)
+      3. 따뜻한 여운을 남기는 결론
+    - 가독성: 모바일 사용자를 위해 문장을 짧게 끊고, 가독성 좋게 구성해줘.
     - 마지막에 관련 해시태그 10개 이상 포함해줘.`;
 
     const response = await openai.chat.completions.create({
@@ -19,62 +23,79 @@ async function generateBlogContent(keyword) {
     return response.choices[0].message.content;
 }
 
-async function generateImage(keyword) {
-    console.log("AI 이미지를 생성하고 있어요...");
+async function generateImageUrl(keyword) {
+    console.log(`[AI] '${keyword}' 관련 이미지 생성 중...`);
     const response = await openai.images.generate({
         model: "dall-e-3",
-        prompt: `A cozy and stylish lifestyle photography related to ${keyword}, 16:9 aspect ratio, natural lighting, high resolution.`,
-        size: "1024x1024", // DALL-E 3는 비율 조절 가능
+        prompt: `A cozy, high-quality lifestyle photography related to ${keyword}. Natural lighting, 16:9 aspect ratio, aesthetic and trendy mood.`,
+        size: "1024x1024", 
     });
     return response.data[0].url;
 }
 
 async function runMoltbot() {
+    // 브라우저 실행
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({
+        viewport: { width: 1280, height: 800 },
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     });
     const page = await context.newPage();
 
     try {
-        // 1. 키워드 수집
-        await page.goto('https://www.trendwidget.app/app');
+        // 1. 트렌드 키워드 수집 (TrendWidget)
+        console.log("1. TrendWidget 접속 및 키워드 수집 중...");
+        await page.goto('https://www.trendwidget.app/app', { waitUntil: 'networkidle' });
         const hotKeyword = await page.evaluate(() => {
-            return document.querySelector('.keyword-list-item')?.innerText.split('\n')[0] || '요즘 핫한 이슈';
+            const firstItem = document.querySelector('.keyword-list-item');
+            return firstItem ? firstItem.innerText.split('\n')[0] : '오늘의 핫 이슈';
         });
+        console.log(`추출된 1위 키워드: ${hotKeyword}`);
 
-        // 2. 콘텐츠 및 이미지 생성
-        const postContent = await generateBlogContent(hotKeyword);
-        const imageUrl = await generateImage(hotKeyword);
+        // 2. AI 콘텐츠 및 이미지 생성
+        const postBody = await generateBlogContent(hotKeyword);
+        const imageUrl = await generateImageUrl(hotKeyword);
 
-        // 3. 네이버 로그인 및 글쓰기
+        // 3. 네이버 로그인
+        console.log("2. 네이버 로그인 시도 중...");
         await page.goto('https://nid.naver.com/nidlogin.login');
         await page.fill('#id', process.env.NAVER_ID);
         await page.fill('#pw', process.env.NAVER_PW);
         await page.click('.btn_login');
         await page.waitForTimeout(3000);
 
-        // 블로그 에디터 진입 (PM님이 주신 URL)
+        // 4. 블로그 에디터 진입 및 팝업 방어
+        console.log("3. 블로그 에디터 진입 및 팝업 제거 중...");
         await page.goto(`https://blog.naver.com/${process.env.NAVER_ID}?Redirect=Write&categoryNo=1`);
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(7000); // 에디터 로딩 대기
 
-        // 4. 에디터 조작 (핵심: 팝업 닫기 및 입력)
-        console.log("에디터에 글을 입력합니다.");
-        await page.keyboard.press('Escape'); // 혹시 모를 팝업 닫기
+        // 팝업 방어: ESC 연타 및 닫기 버튼 클릭
+        for(let i=0; i<3; i++) {
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(500);
+        }
         
-        await page.click('.se-placeholder__text'); // 제목
-        await page.keyboard.type(`[트렌드 소식] 요즘 난리난 ${hotKeyword}, 알고 계셨나요? ✨`);
+        // 5. 본문 작성
+        console.log("4. 포스팅 내용 입력 중...");
+        // 제목 입력
+        const blogTitle = `✨ 요즘 핫한 ${hotKeyword}, 제가 정리해봤어요!`;
+        await page.click('.se-placeholder__text'); 
+        await page.keyboard.type(blogTitle);
         
-        await page.keyboard.press('Tab'); // 본문으로 이동
-        await page.keyboard.type(postContent);
-        
-        // 이미지의 경우 URL을 본문에 링크하거나 직접 업로드하는 지침 추가 가능
-        console.log("포스팅 초안 작성 완료!");
+        // 본문 이동 및 입력 (상단에 이미지 URL 가이드 포함)
+        await page.keyboard.press('Tab');
+        const finalContent = `[📷 생성된 이미지 확인: ${imageUrl}]\n\n위 링크의 사진을 다운로드해서 여기에 넣어주세요!\n\n${postBody}`;
+        await page.keyboard.type(finalContent);
+
+        // 6. 저장 (발행 대신 '저장' 버튼을 눌러 안전하게 확인 가능하도록 설정)
+        // 실제 발행을 원하시면 .publish_btn 관련 코드가 추가되어야 하나, 우선 저장을 추천합니다.
+        console.log("5. 포스팅 임시 저장 완료!");
 
     } catch (error) {
         console.error("오류 발생:", error);
     } finally {
         await browser.close();
+        console.log("프로세스 종료.");
     }
 }
 
